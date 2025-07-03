@@ -1,8 +1,6 @@
--- Modern Roblox Script Rewrite
--- Clean, organized, and optimized version
 
 local script_info = {
-    name = "Enhanced Script",
+    name = "Work in Progress",
     version = "2.0",
     author = "Rewritten"
 }
