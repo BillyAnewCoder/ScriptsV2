@@ -3,9 +3,9 @@
 -- Optimized for performance and detection evasion
 
 local script_info = {
-    name = "Advanced Script",
+    name = "Test",
     version = "3.0",
-    author = "Enhanced"
+    author = "CodDemon"
 }
 
 -- Services
