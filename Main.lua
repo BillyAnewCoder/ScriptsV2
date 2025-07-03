@@ -1,8 +1,11 @@
+-- Advanced Roblox Script - Modern Rewrite
+-- Enhanced with Drawing Library ESP and Bubbly GUI
+-- Optimized for performance and detection evasion
 
 local script_info = {
-    name = "Work in Progress",
-    version = "2.0",
-    author = "Rewritten"
+    name = "Advanced Script",
+    version = "3.0",
+    author = "Enhanced"
 }
 
 -- Services
@@ -11,6 +14,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
+local CoreGui = game:GetService("CoreGui")
 
 -- Constants
 local PLAYER = Players.LocalPlayer
@@ -21,8 +25,20 @@ local PLAYER_GUI = PLAYER:WaitForChild("PlayerGui")
 local Config = {
     GUI = {
         openCloseButton = true,
-        keybindEnable = false,
-        keybind = Enum.KeyCode.Z
+        keybindEnable = true,
+        keybind = Enum.KeyCode.Insert,
+        theme = {
+            primary = Color3.fromRGB(138, 43, 226),
+            secondary = Color3.fromRGB(75, 0, 130),
+            accent = Color3.fromRGB(255, 20, 147),
+            background = Color3.fromRGB(25, 25, 35),
+            surface = Color3.fromRGB(35, 35, 50),
+            text = Color3.fromRGB(255, 255, 255),
+            textSecondary = Color3.fromRGB(200, 200, 200),
+            success = Color3.fromRGB(46, 204, 113),
+            warning = Color3.fromRGB(241, 196, 15),
+            error = Color3.fromRGB(231, 76, 60)
+        }
     },
     
     Aimbot = {
@@ -35,13 +51,14 @@ local Config = {
         aimPart = "Head",
         keybind = Enum.UserInputType.MouseButton2,
         isAiming = false,
+        prediction = 0.1,
         
         -- Visual settings
-        fovColor = Color3.fromRGB(100, 0, 100),
-        fovFillColor = Color3.fromRGB(100, 0, 100),
-        fovTransparency = 0,
-        fovFillTransparency = 1,
-        thickness = 1
+        fovColor = Color3.fromRGB(138, 43, 226),
+        fovFillColor = Color3.fromRGB(138, 43, 226),
+        fovTransparency = 0.8,
+        fovFillTransparency = 0.95,
+        thickness = 2
     },
     
     ESP = {
@@ -52,25 +69,35 @@ local Config = {
             showHealth = false,
             teamCheck = false,
             healthType = "Bar", -- "Bar", "Text", "Both"
-            color = Color3.fromRGB(255, 255, 255)
-        },
-        
-        Outlines = {
-            enabled = false,
-            teamCheck = false,
-            teamColor = false,
-            alwaysShow = true,
-            fillColor = Color3.fromRGB(75, 0, 10),
-            fillTransparency = 0.5,
-            outlineColor = Color3.fromRGB(0, 0, 0),
-            outlineTransparency = 0
+            color = Color3.fromRGB(138, 43, 226),
+            thickness = 2,
+            filled = false,
+            fillTransparency = 0.1
         },
         
         Tracers = {
             enabled = false,
             teamCheck = false,
             teamColor = false,
-            color = Color3.fromRGB(75, 0, 10)
+            color = Color3.fromRGB(138, 43, 226),
+            thickness = 2,
+            from = "Bottom" -- "Bottom", "Center", "Top"
+        },
+        
+        Skeleton = {
+            enabled = false,
+            teamCheck = false,
+            color = Color3.fromRGB(255, 255, 255),
+            thickness = 1
+        },
+        
+        Chams = {
+            enabled = false,
+            teamCheck = false,
+            fillColor = Color3.fromRGB(138, 43, 226),
+            outlineColor = Color3.fromRGB(255, 255, 255),
+            fillTransparency = 0.5,
+            outlineTransparency = 0
         }
     }
 }
@@ -84,13 +111,15 @@ function Utils.createScreenGui(name, parent)
     gui.Parent = parent or PLAYER_GUI
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.IgnoreGuiInset = true
     return gui
 end
 
 function Utils.isPlayerValid(player)
     return player and player ~= PLAYER and player.Character and 
            player.Character:FindFirstChild("Humanoid") and 
-           player.Character.Humanoid.Health > 0
+           player.Character.Humanoid.Health > 0 and
+           player.Character:FindFirstChild("HumanoidRootPart")
 end
 
 function Utils.getDistance(player)
@@ -119,45 +148,460 @@ function Utils.isVisible(targetPosition, targetCharacter)
     return not raycastResult
 end
 
--- FOV Circle
+function Utils.worldToScreen(position)
+    local screenPos, onScreen = CAMERA:WorldToViewportPoint(position)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
+end
+
+function Utils.getCorners(character)
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return nil
+    end
+    
+    local humanoidRootPart = character.HumanoidRootPart
+    local size = humanoidRootPart.Size
+    local cf = humanoidRootPart.CFrame
+    
+    local corners = {
+        cf * CFrame.new(-size.X/2, size.Y/2, 0),
+        cf * CFrame.new(size.X/2, size.Y/2, 0),
+        cf * CFrame.new(-size.X/2, -size.Y/2, 0),
+        cf * CFrame.new(size.X/2, -size.Y/2, 0)
+    }
+    
+    local screenCorners = {}
+    for i, corner in ipairs(corners) do
+        local screenPos, onScreen = Utils.worldToScreen(corner.Position)
+        if not onScreen then return nil end
+        screenCorners[i] = screenPos
+    end
+    
+    local minX = math.min(screenCorners[1].X, screenCorners[2].X, screenCorners[3].X, screenCorners[4].X)
+    local maxX = math.max(screenCorners[1].X, screenCorners[2].X, screenCorners[3].X, screenCorners[4].X)
+    local minY = math.min(screenCorners[1].Y, screenCorners[2].Y, screenCorners[3].Y, screenCorners[4].Y)
+    local maxY = math.max(screenCorners[1].Y, screenCorners[2].Y, screenCorners[3].Y, screenCorners[4].Y)
+    
+    return {
+        topLeft = Vector2.new(minX, minY),
+        topRight = Vector2.new(maxX, minY),
+        bottomLeft = Vector2.new(minX, maxY),
+        bottomRight = Vector2.new(maxX, maxY),
+        size = Vector2.new(maxX - minX, maxY - minY)
+    }
+end
+
+-- Animation System
+local AnimationSystem = {}
+
+function AnimationSystem.tween(object, properties, duration, easingStyle, easingDirection)
+    duration = duration or 0.3
+    easingStyle = easingStyle or Enum.EasingStyle.Quart
+    easingDirection = easingDirection or Enum.EasingDirection.Out
+    
+    local tweenInfo = TweenInfo.new(duration, easingStyle, easingDirection)
+    local tween = TweenService:Create(object, tweenInfo, properties)
+    tween:Play()
+    return tween
+end
+
+function AnimationSystem.spring(object, properties, duration)
+    return AnimationSystem.tween(object, properties, duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+end
+
+function AnimationSystem.bounce(object, properties, duration)
+    return AnimationSystem.tween(object, properties, duration, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
+end
+
+-- FOV Circle Module
 local FOVModule = {}
 
 function FOVModule.init()
-    FOVModule.gui = Utils.createScreenGui("FOVCircle")
-    
-    FOVModule.frame = Instance.new("Frame")
-    FOVModule.frame.Name = "FOVFrame"
-    FOVModule.frame.Parent = FOVModule.gui
-    FOVModule.frame.BackgroundTransparency = 1
-    FOVModule.frame.AnchorPoint = Vector2.new(0.5, 0.5)
-    FOVModule.frame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    FOVModule.frame.Size = UDim2.new(0, 100, 0, 100)
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(1, 0)
-    corner.Parent = FOVModule.frame
-    
-    FOVModule.stroke = Instance.new("UIStroke")
-    FOVModule.stroke.Parent = FOVModule.frame
-    FOVModule.stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    FOVModule.stroke.Thickness = Config.Aimbot.thickness
-    FOVModule.stroke.Color = Config.Aimbot.fovColor
-    FOVModule.stroke.Transparency = Config.Aimbot.fovTransparency
+    FOVModule.circle = Drawing.new("Circle")
+    FOVModule.circle.Thickness = Config.Aimbot.thickness
+    FOVModule.circle.NumSides = 64
+    FOVModule.circle.Radius = Config.Aimbot.fov
+    FOVModule.circle.Filled = false
+    FOVModule.circle.Color = Config.Aimbot.fovColor
+    FOVModule.circle.Transparency = 1 - Config.Aimbot.fovTransparency
+    FOVModule.circle.Visible = false
 end
 
 function FOVModule.update()
-    if not FOVModule.frame then return end
+    if not FOVModule.circle then return end
     
     local mousePos = UserInputService:GetMouseLocation()
-    FOVModule.frame.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y - 36)
-    FOVModule.frame.Size = UDim2.new(0, Config.Aimbot.fov * 2, 0, Config.Aimbot.fov * 2)
-    FOVModule.frame.Visible = Config.Aimbot.showFov
-    FOVModule.frame.BackgroundColor3 = Config.Aimbot.fovFillColor
-    FOVModule.frame.BackgroundTransparency = Config.Aimbot.fovFillTransparency
+    FOVModule.circle.Position = mousePos
+    FOVModule.circle.Radius = Config.Aimbot.fov
+    FOVModule.circle.Visible = Config.Aimbot.showFov
+    FOVModule.circle.Color = Config.Aimbot.fovColor
+    FOVModule.circle.Transparency = 1 - Config.Aimbot.fovTransparency
+    FOVModule.circle.Thickness = Config.Aimbot.thickness
+end
+
+function FOVModule.cleanup()
+    if FOVModule.circle then
+        FOVModule.circle:Remove()
+        FOVModule.circle = nil
+    end
+end
+
+-- ESP Module with Drawing Library
+local ESPModule = {}
+ESPModule.objects = {}
+
+function ESPModule.init()
+    -- Initialize ESP system
+end
+
+function ESPModule.createESP(player)
+    if ESPModule.objects[player] then
+        ESPModule.removeESP(player)
+    end
     
-    FOVModule.stroke.Color = Config.Aimbot.fovColor
-    FOVModule.stroke.Transparency = Config.Aimbot.fovTransparency
-    FOVModule.stroke.Thickness = Config.Aimbot.thickness
+    local espObjects = {
+        box = Drawing.new("Square"),
+        boxOutline = Drawing.new("Square"),
+        tracer = Drawing.new("Line"),
+        nameText = Drawing.new("Text"),
+        distanceText = Drawing.new("Text"),
+        healthText = Drawing.new("Text"),
+        healthBar = Drawing.new("Square"),
+        healthBarOutline = Drawing.new("Square"),
+        skeleton = {},
+        chams = nil
+    }
+    
+    -- Box setup
+    espObjects.box.Thickness = Config.ESP.Box.thickness
+    espObjects.box.Filled = Config.ESP.Box.filled
+    espObjects.box.Color = Config.ESP.Box.color
+    espObjects.box.Transparency = Config.ESP.Box.fillTransparency
+    espObjects.box.Visible = false
+    
+    espObjects.boxOutline.Thickness = Config.ESP.Box.thickness + 1
+    espObjects.boxOutline.Filled = false
+    espObjects.boxOutline.Color = Color3.new(0, 0, 0)
+    espObjects.boxOutline.Transparency = 0.5
+    espObjects.boxOutline.Visible = false
+    
+    -- Tracer setup
+    espObjects.tracer.Thickness = Config.ESP.Tracers.thickness
+    espObjects.tracer.Color = Config.ESP.Tracers.color
+    espObjects.tracer.Transparency = 0.8
+    espObjects.tracer.Visible = false
+    
+    -- Text setup
+    espObjects.nameText.Size = 16
+    espObjects.nameText.Center = true
+    espObjects.nameText.Outline = true
+    espObjects.nameText.OutlineColor = Color3.new(0, 0, 0)
+    espObjects.nameText.Color = Config.ESP.Box.color
+    espObjects.nameText.Font = Drawing.Fonts.Plex
+    espObjects.nameText.Visible = false
+    
+    espObjects.distanceText.Size = 14
+    espObjects.distanceText.Center = true
+    espObjects.distanceText.Outline = true
+    espObjects.distanceText.OutlineColor = Color3.new(0, 0, 0)
+    espObjects.distanceText.Color = Config.ESP.Box.color
+    espObjects.distanceText.Font = Drawing.Fonts.Plex
+    espObjects.distanceText.Visible = false
+    
+    espObjects.healthText.Size = 14
+    espObjects.healthText.Center = true
+    espObjects.healthText.Outline = true
+    espObjects.healthText.OutlineColor = Color3.new(0, 0, 0)
+    espObjects.healthText.Color = Config.ESP.Box.color
+    espObjects.healthText.Font = Drawing.Fonts.Plex
+    espObjects.healthText.Visible = false
+    
+    -- Health bar setup
+    espObjects.healthBar.Filled = true
+    espObjects.healthBar.Thickness = 1
+    espObjects.healthBar.Transparency = 0.8
+    espObjects.healthBar.Visible = false
+    
+    espObjects.healthBarOutline.Filled = false
+    espObjects.healthBarOutline.Thickness = 1
+    espObjects.healthBarOutline.Color = Color3.new(0, 0, 0)
+    espObjects.healthBarOutline.Transparency = 0.5
+    espObjects.healthBarOutline.Visible = false
+    
+    -- Skeleton setup
+    local skeletonConnections = {
+        {"Head", "UpperTorso"},
+        {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "LeftUpperArm"},
+        {"LeftUpperArm", "LeftLowerArm"},
+        {"LeftLowerArm", "LeftHand"},
+        {"UpperTorso", "RightUpperArm"},
+        {"RightUpperArm", "RightLowerArm"},
+        {"RightLowerArm", "RightHand"},
+        {"LowerTorso", "LeftUpperLeg"},
+        {"LeftUpperLeg", "LeftLowerLeg"},
+        {"LeftLowerLeg", "LeftFoot"},
+        {"LowerTorso", "RightUpperLeg"},
+        {"RightUpperLeg", "RightLowerLeg"},
+        {"RightLowerLeg", "RightFoot"}
+    }
+    
+    for i, connection in ipairs(skeletonConnections) do
+        local line = Drawing.new("Line")
+        line.Thickness = Config.ESP.Skeleton.thickness
+        line.Color = Config.ESP.Skeleton.color
+        line.Transparency = 0.8
+        line.Visible = false
+        espObjects.skeleton[i] = line
+    end
+    
+    -- Chams setup
+    if player.Character then
+        espObjects.chams = Instance.new("Highlight")
+        espObjects.chams.Parent = player.Character
+        espObjects.chams.FillColor = Config.ESP.Chams.fillColor
+        espObjects.chams.OutlineColor = Config.ESP.Chams.outlineColor
+        espObjects.chams.FillTransparency = Config.ESP.Chams.fillTransparency
+        espObjects.chams.OutlineTransparency = Config.ESP.Chams.outlineTransparency
+        espObjects.chams.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        espObjects.chams.Enabled = false
+    end
+    
+    ESPModule.objects[player] = espObjects
+end
+
+function ESPModule.updateESP(player)
+    if not Utils.isPlayerValid(player) or not ESPModule.objects[player] then
+        return
+    end
+    
+    local espObjects = ESPModule.objects[player]
+    local character = player.Character
+    local humanoid = character.Humanoid
+    local rootPart = character.HumanoidRootPart
+    
+    -- Team check
+    local showForTeam = not ((Config.ESP.Box.teamCheck or Config.ESP.Tracers.teamCheck or Config.ESP.Skeleton.teamCheck) 
+                            and player.Team == PLAYER.Team)
+    
+    if not showForTeam then
+        ESPModule.hideESP(player)
+        return
+    end
+    
+    local corners = Utils.getCorners(character)
+    if not corners then
+        ESPModule.hideESP(player)
+        return
+    end
+    
+    -- Update box ESP
+    if Config.ESP.Box.enabled then
+        espObjects.boxOutline.Size = corners.size + Vector2.new(2, 2)
+        espObjects.boxOutline.Position = corners.topLeft - Vector2.new(1, 1)
+        espObjects.boxOutline.Visible = true
+        
+        espObjects.box.Size = corners.size
+        espObjects.box.Position = corners.topLeft
+        espObjects.box.Color = Config.ESP.Box.color
+        espObjects.box.Visible = true
+    else
+        espObjects.box.Visible = false
+        espObjects.boxOutline.Visible = false
+    end
+    
+    -- Update tracer ESP
+    if Config.ESP.Tracers.enabled then
+        local tracerStart
+        if Config.ESP.Tracers.from == "Bottom" then
+            tracerStart = Vector2.new(CAMERA.ViewportSize.X / 2, CAMERA.ViewportSize.Y)
+        elseif Config.ESP.Tracers.from == "Center" then
+            tracerStart = Vector2.new(CAMERA.ViewportSize.X / 2, CAMERA.ViewportSize.Y / 2)
+        else -- Top
+            tracerStart = Vector2.new(CAMERA.ViewportSize.X / 2, 0)
+        end
+        
+        local rootPos, onScreen = Utils.worldToScreen(rootPart.Position)
+        if onScreen then
+            espObjects.tracer.From = tracerStart
+            espObjects.tracer.To = rootPos
+            espObjects.tracer.Color = Config.ESP.Tracers.teamColor and player.TeamColor.Color or Config.ESP.Tracers.color
+            espObjects.tracer.Visible = true
+        else
+            espObjects.tracer.Visible = false
+        end
+    else
+        espObjects.tracer.Visible = false
+    end
+    
+    -- Update text ESP
+    if Config.ESP.Box.showName then
+        espObjects.nameText.Text = player.Name
+        espObjects.nameText.Position = Vector2.new(corners.topLeft.X + corners.size.X / 2, corners.topLeft.Y - 20)
+        espObjects.nameText.Visible = true
+    else
+        espObjects.nameText.Visible = false
+    end
+    
+    if Config.ESP.Box.showDistance then
+        local distance = math.floor(Utils.getDistance(player))
+        espObjects.distanceText.Text = distance .. "m"
+        espObjects.distanceText.Position = Vector2.new(corners.topLeft.X + corners.size.X / 2, corners.bottomLeft.Y + 5)
+        espObjects.distanceText.Visible = true
+    else
+        espObjects.distanceText.Visible = false
+    end
+    
+    -- Update health ESP
+    if Config.ESP.Box.showHealth then
+        local healthPercent = humanoid.Health / humanoid.MaxHealth
+        
+        if Config.ESP.Box.healthType == "Text" or Config.ESP.Box.healthType == "Both" then
+            espObjects.healthText.Text = math.floor(humanoid.Health) .. " HP"
+            espObjects.healthText.Position = Vector2.new(corners.topLeft.X + corners.size.X / 2, corners.bottomLeft.Y + 20)
+            espObjects.healthText.Visible = true
+        else
+            espObjects.healthText.Visible = false
+        end
+        
+        if Config.ESP.Box.healthType == "Bar" or Config.ESP.Box.healthType == "Both" then
+            local barHeight = corners.size.Y * healthPercent
+            local barWidth = 4
+            
+            espObjects.healthBarOutline.Size = Vector2.new(barWidth + 2, corners.size.Y + 2)
+            espObjects.healthBarOutline.Position = Vector2.new(corners.topLeft.X - barWidth - 3, corners.topLeft.Y - 1)
+            espObjects.healthBarOutline.Visible = true
+            
+            espObjects.healthBar.Size = Vector2.new(barWidth, barHeight)
+            espObjects.healthBar.Position = Vector2.new(corners.topLeft.X - barWidth - 2, corners.bottomLeft.Y - barHeight)
+            
+            -- Color health bar based on health
+            if healthPercent > 0.6 then
+                espObjects.healthBar.Color = Color3.fromRGB(0, 255, 0)
+            elseif healthPercent > 0.3 then
+                espObjects.healthBar.Color = Color3.fromRGB(255, 255, 0)
+            else
+                espObjects.healthBar.Color = Color3.fromRGB(255, 0, 0)
+            end
+            
+            espObjects.healthBar.Visible = true
+        else
+            espObjects.healthBar.Visible = false
+            espObjects.healthBarOutline.Visible = false
+        end
+    else
+        espObjects.healthText.Visible = false
+        espObjects.healthBar.Visible = false
+        espObjects.healthBarOutline.Visible = false
+    end
+    
+    -- Update skeleton ESP
+    if Config.ESP.Skeleton.enabled then
+        local skeletonConnections = {
+            {"Head", "UpperTorso"},
+            {"UpperTorso", "LowerTorso"},
+            {"UpperTorso", "LeftUpperArm"},
+            {"LeftUpperArm", "LeftLowerArm"},
+            {"LeftLowerArm", "LeftHand"},
+            {"UpperTorso", "RightUpperArm"},
+            {"RightUpperArm", "RightLowerArm"},
+            {"RightLowerArm", "RightHand"},
+            {"LowerTorso", "LeftUpperLeg"},
+            {"LeftUpperLeg", "LeftLowerLeg"},
+            {"LeftLowerLeg", "LeftFoot"},
+            {"LowerTorso", "RightUpperLeg"},
+            {"RightUpperLeg", "RightLowerLeg"},
+            {"RightLowerLeg", "RightFoot"}
+        }
+        
+        for i, connection in ipairs(skeletonConnections) do
+            local part1 = character:FindFirstChild(connection[1])
+            local part2 = character:FindFirstChild(connection[2])
+            
+            if part1 and part2 and espObjects.skeleton[i] then
+                local pos1, onScreen1 = Utils.worldToScreen(part1.Position)
+                local pos2, onScreen2 = Utils.worldToScreen(part2.Position)
+                
+                if onScreen1 and onScreen2 then
+                    espObjects.skeleton[i].From = pos1
+                    espObjects.skeleton[i].To = pos2
+                    espObjects.skeleton[i].Color = Config.ESP.Skeleton.color
+                    espObjects.skeleton[i].Visible = true
+                else
+                    espObjects.skeleton[i].Visible = false
+                end
+            elseif espObjects.skeleton[i] then
+                espObjects.skeleton[i].Visible = false
+            end
+        end
+    else
+        for _, line in ipairs(espObjects.skeleton) do
+            line.Visible = false
+        end
+    end
+    
+    -- Update chams ESP
+    if Config.ESP.Chams.enabled and espObjects.chams then
+        espObjects.chams.Enabled = true
+        espObjects.chams.FillColor = Config.ESP.Chams.fillColor
+        espObjects.chams.OutlineColor = Config.ESP.Chams.outlineColor
+        espObjects.chams.FillTransparency = Config.ESP.Chams.fillTransparency
+        espObjects.chams.OutlineTransparency = Config.ESP.Chams.outlineTransparency
+    elseif espObjects.chams then
+        espObjects.chams.Enabled = false
+    end
+end
+
+function ESPModule.hideESP(player)
+    if not ESPModule.objects[player] then return end
+    
+    local espObjects = ESPModule.objects[player]
+    espObjects.box.Visible = false
+    espObjects.boxOutline.Visible = false
+    espObjects.tracer.Visible = false
+    espObjects.nameText.Visible = false
+    espObjects.distanceText.Visible = false
+    espObjects.healthText.Visible = false
+    espObjects.healthBar.Visible = false
+    espObjects.healthBarOutline.Visible = false
+    
+    for _, line in ipairs(espObjects.skeleton) do
+        line.Visible = false
+    end
+    
+    if espObjects.chams then
+        espObjects.chams.Enabled = false
+    end
+end
+
+function ESPModule.removeESP(player)
+    if not ESPModule.objects[player] then return end
+    
+    local espObjects = ESPModule.objects[player]
+    
+    espObjects.box:Remove()
+    espObjects.boxOutline:Remove()
+    espObjects.tracer:Remove()
+    espObjects.nameText:Remove()
+    espObjects.distanceText:Remove()
+    espObjects.healthText:Remove()
+    espObjects.healthBar:Remove()
+    espObjects.healthBarOutline:Remove()
+    
+    for _, line in ipairs(espObjects.skeleton) do
+        line:Remove()
+    end
+    
+    if espObjects.chams then
+        espObjects.chams:Destroy()
+    end
+    
+    ESPModule.objects[player] = nil
+end
+
+function ESPModule.cleanup()
+    for player, _ in pairs(ESPModule.objects) do
+        ESPModule.removeESP(player)
+    end
 end
 
 -- Aimbot Module
@@ -176,12 +620,16 @@ function AimbotModule.getClosestPlayer()
         local aimPart = player.Character:FindFirstChild(Config.Aimbot.aimPart)
         if not aimPart then continue end
         
-        local screenPos, onScreen = CAMERA:WorldToViewportPoint(aimPart.Position)
+        -- Prediction
+        local velocity = player.Character.HumanoidRootPart.Velocity
+        local predictedPosition = aimPart.Position + (velocity * Config.Aimbot.prediction)
+        
+        local screenPos, onScreen = Utils.worldToScreen(predictedPosition)
         if not onScreen then continue end
         
-        local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        local distance = (screenPos - mousePos).Magnitude
         
-        if distance < shortestDistance and Utils.isVisible(aimPart.Position, player.Character) then
+        if distance < shortestDistance and Utils.isVisible(predictedPosition, player.Character) then
             shortestDistance = distance
             closestPlayer = player
         end
@@ -196,292 +644,29 @@ function AimbotModule.aimAt(targetPlayer)
     local aimPart = targetPlayer.Character:FindFirstChild(Config.Aimbot.aimPart)
     if not aimPart then return end
     
-    local targetPosition = aimPart.Position
-    local currentCFrame = CAMERA.CFrame
+    -- Prediction
+    local velocity = targetPlayer.Character.HumanoidRootPart.Velocity
+    local predictedPosition = aimPart.Position + (velocity * Config.Aimbot.prediction)
     
-    -- Calculate smooth aim
-    local direction = (targetPosition - currentCFrame.Position).Unit
-    local newCFrame = CFrame.lookAt(currentCFrame.Position, 
-                                   currentCFrame.Position + direction)
+    local currentCFrame = CAMERA.CFrame
+    local direction = (predictedPosition - currentCFrame.Position).Unit
+    local newCFrame = CFrame.lookAt(currentCFrame.Position, currentCFrame.Position + direction)
     
     -- Apply smoothing
     local smoothedCFrame = currentCFrame:Lerp(newCFrame, Config.Aimbot.smoothing)
     CAMERA.CFrame = smoothedCFrame
 end
 
--- ESP Module
-local ESPModule = {}
-ESPModule.objects = {}
-
-function ESPModule.init()
-    ESPModule.boxGui = Utils.createScreenGui("BoxESP")
-    ESPModule.tracerGui = Utils.createScreenGui("TracerESP")
-    ESPModule.highlightGui = Utils.createScreenGui("HighlightESP")
-end
-
-function ESPModule.createBox(player)
-    local container = Instance.new("BillboardGui")
-    container.Name = player.Name
-    container.Parent = ESPModule.boxGui
-    container.AlwaysOnTop = true
-    container.Size = UDim2.new(4, 0, 5.4, 0)
-    container.StudsOffset = Vector3.new(0, 0, 0)
-    
-    -- Box outline
-    local box = Instance.new("Frame")
-    box.Parent = container
-    box.Size = UDim2.new(1, 0, 1, 0)
-    box.BackgroundTransparency = 1
-    box.BorderSizePixel = 2
-    box.BorderColor3 = Config.ESP.Box.color
-    
-    -- Info container
-    local infoContainer = Instance.new("Frame")
-    infoContainer.Name = "InfoContainer"
-    infoContainer.Parent = container
-    infoContainer.Size = UDim2.new(1, 0, 0, 60)
-    infoContainer.Position = UDim2.new(0, 0, 1, 5)
-    infoContainer.BackgroundTransparency = 1
-    
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Parent = infoContainer
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    
-    -- Name label
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Name = "NameLabel"
-    nameLabel.Parent = infoContainer
-    nameLabel.Size = UDim2.new(1, 0, 0, 20)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = player.Name
-    nameLabel.TextColor3 = Config.ESP.Box.color
-    nameLabel.TextStrokeTransparency = 0
-    nameLabel.TextScaled = true
-    nameLabel.Font = Enum.Font.GothamBold
-    
-    -- Distance label
-    local distanceLabel = Instance.new("TextLabel")
-    distanceLabel.Name = "DistanceLabel"
-    distanceLabel.Parent = infoContainer
-    distanceLabel.Size = UDim2.new(1, 0, 0, 20)
-    distanceLabel.BackgroundTransparency = 1
-    distanceLabel.TextColor3 = Config.ESP.Box.color
-    distanceLabel.TextStrokeTransparency = 0
-    distanceLabel.TextScaled = true
-    distanceLabel.Font = Enum.Font.Gotham
-    
-    -- Health label
-    local healthLabel = Instance.new("TextLabel")
-    healthLabel.Name = "HealthLabel"
-    healthLabel.Parent = infoContainer
-    healthLabel.Size = UDim2.new(1, 0, 0, 20)
-    healthLabel.BackgroundTransparency = 1
-    healthLabel.TextColor3 = Config.ESP.Box.color
-    healthLabel.TextStrokeTransparency = 0
-    healthLabel.TextScaled = true
-    healthLabel.Font = Enum.Font.Gotham
-    
-    -- Health bar
-    local healthBarContainer = Instance.new("Frame")
-    healthBarContainer.Name = "HealthBarContainer"
-    healthBarContainer.Parent = container
-    healthBarContainer.Size = UDim2.new(0, 4, 1, 0)
-    healthBarContainer.Position = UDim2.new(0, -8, 0, 0)
-    healthBarContainer.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    healthBarContainer.BorderSizePixel = 1
-    healthBarContainer.BorderColor3 = Color3.fromRGB(0, 0, 0)
-    
-    local healthBar = Instance.new("Frame")
-    healthBar.Name = "HealthBar"
-    healthBar.Parent = healthBarContainer
-    healthBar.Size = UDim2.new(1, 0, 1, 0)
-    healthBar.Position = UDim2.new(0, 0, 0, 0)
-    healthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-    healthBar.BorderSizePixel = 0
-    healthBar.AnchorPoint = Vector2.new(0, 1)
-    healthBar.Position = UDim2.new(0, 0, 1, 0)
-    
-    return container
-end
-
-function ESPModule.createTracer(player)
-    local tracer = Instance.new("Frame")
-    tracer.Name = player.Name
-    tracer.Parent = ESPModule.tracerGui
-    tracer.BackgroundColor3 = Config.ESP.Tracers.color
-    tracer.BorderSizePixel = 0
-    tracer.AnchorPoint = Vector2.new(0.5, 0.5)
-    tracer.Visible = false
-    
-    return tracer
-end
-
-function ESPModule.createHighlight(player)
-    local highlight = Instance.new("Highlight")
-    highlight.Name = player.Name
-    highlight.Parent = ESPModule.highlightGui
-    highlight.FillColor = Config.ESP.Outlines.fillColor
-    highlight.FillTransparency = Config.ESP.Outlines.fillTransparency
-    highlight.OutlineColor = Config.ESP.Outlines.outlineColor
-    highlight.OutlineTransparency = Config.ESP.Outlines.outlineTransparency
-    highlight.DepthMode = Config.ESP.Outlines.alwaysShow and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-    
-    if player.Character then
-        highlight.Adornee = player.Character
-    end
-    
-    return highlight
-end
-
-function ESPModule.addPlayer(player)
-    if ESPModule.objects[player] then return end
-    
-    ESPModule.objects[player] = {
-        box = ESPModule.createBox(player),
-        tracer = ESPModule.createTracer(player),
-        highlight = ESPModule.createHighlight(player)
-    }
-    
-    -- Handle character respawning
-    local function onCharacterAdded(character)
-        if ESPModule.objects[player] and ESPModule.objects[player].highlight then
-            ESPModule.objects[player].highlight.Adornee = character
-        end
-        if ESPModule.objects[player] and ESPModule.objects[player].box then
-            ESPModule.objects[player].box.Adornee = character:FindFirstChild("HumanoidRootPart")
-        end
-    end
-    
-    player.CharacterAdded:Connect(onCharacterAdded)
-    if player.Character then
-        onCharacterAdded(player.Character)
-    end
-end
-
-function ESPModule.removePlayer(player)
-    if not ESPModule.objects[player] then return end
-    
-    for _, object in pairs(ESPModule.objects[player]) do
-        if object then
-            object:Destroy()
-        end
-    end
-    
-    ESPModule.objects[player] = nil
-end
-
-function ESPModule.updatePlayer(player)
-    if not Utils.isPlayerValid(player) or not ESPModule.objects[player] then return end
-    
-    local objects = ESPModule.objects[player]
-    local character = player.Character
-    local humanoid = character.Humanoid
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    
-    if not rootPart then return end
-    
-    -- Team check
-    local showForTeam = not ((Config.ESP.Box.teamCheck or Config.ESP.Outlines.teamCheck or Config.ESP.Tracers.teamCheck) 
-                            and player.Team == PLAYER.Team)
-    
-    -- Update box ESP
-    if objects.box then
-        objects.box.Enabled = Config.ESP.Box.enabled and showForTeam
-        objects.box.Adornee = rootPart
-        
-        local nameLabel = objects.box:FindFirstChild("InfoContainer"):FindFirstChild("NameLabel")
-        local distanceLabel = objects.box:FindFirstChild("InfoContainer"):FindFirstChild("DistanceLabel")
-        local healthLabel = objects.box:FindFirstChild("InfoContainer"):FindFirstChild("HealthLabel")
-        local healthBar = objects.box:FindFirstChild("HealthBarContainer"):FindFirstChild("HealthBar")
-        
-        if nameLabel then
-            nameLabel.Visible = Config.ESP.Box.showName
-        end
-        
-        if distanceLabel then
-            distanceLabel.Visible = Config.ESP.Box.showDistance
-            if Config.ESP.Box.showDistance then
-                distanceLabel.Text = string.format("Distance: %.0f", Utils.getDistance(player))
-            end
-        end
-        
-        if healthLabel and healthBar then
-            local showHealth = Config.ESP.Box.showHealth
-            healthLabel.Visible = showHealth and (Config.ESP.Box.healthType == "Text" or Config.ESP.Box.healthType == "Both")
-            healthBar.Parent.Visible = showHealth and (Config.ESP.Box.healthType == "Bar" or Config.ESP.Box.healthType == "Both")
-            
-            if showHealth then
-                local healthPercent = humanoid.Health / humanoid.MaxHealth
-                healthLabel.Text = string.format("Health: %.0f", humanoid.Health)
-                healthBar.Size = UDim2.new(1, 0, healthPercent, 0)
-                
-                -- Color health bar based on health
-                if healthPercent > 0.6 then
-                    healthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-                elseif healthPercent > 0.3 then
-                    healthBar.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
-                else
-                    healthBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-                end
-            end
-        end
-    end
-    
-    -- Update highlight ESP
-    if objects.highlight then
-        objects.highlight.Enabled = Config.ESP.Outlines.enabled and showForTeam
-        if Config.ESP.Outlines.teamColor and player.Team then
-            objects.highlight.FillColor = player.Team.TeamColor.Color
-        else
-            objects.highlight.FillColor = Config.ESP.Outlines.fillColor
-        end
-    end
-    
-    -- Update tracer ESP
-    if objects.tracer then
-        local showTracer = Config.ESP.Tracers.enabled and showForTeam
-        objects.tracer.Visible = showTracer
-        
-        if showTracer then
-            local screenPos, onScreen = CAMERA:WorldToViewportPoint(rootPart.Position)
-            
-            if onScreen then
-                local screenCenter = Vector2.new(CAMERA.ViewportSize.X / 2, CAMERA.ViewportSize.Y)
-                local targetPos = Vector2.new(screenPos.X, screenPos.Y)
-                
-                local distance = (screenCenter - targetPos).Magnitude
-                local midPoint = (screenCenter + targetPos) / 2
-                local angle = math.atan2(targetPos.Y - screenCenter.Y, targetPos.X - screenCenter.X)
-                
-                objects.tracer.Position = UDim2.new(0, midPoint.X, 0, midPoint.Y)
-                objects.tracer.Size = UDim2.new(0, distance, 0, 2)
-                objects.tracer.Rotation = math.deg(angle)
-                
-                if Config.ESP.Tracers.teamColor and player.Team then
-                    objects.tracer.BackgroundColor3 = player.Team.TeamColor.Color
-                else
-                    objects.tracer.BackgroundColor3 = Config.ESP.Tracers.color
-                end
-            else
-                objects.tracer.Visible = false
-            end
-        end
-    end
-end
-
--- GUI Module
+-- Modern Bubbly GUI Module
 local GUIModule = {}
 
 function GUIModule.init()
-    -- Create main GUI
-    GUIModule.screenGui = Utils.createScreenGui("MainGUI")
+    GUIModule.screenGui = Utils.createScreenGui("ModernGUI")
     
-    -- Create toggle button
     if Config.GUI.openCloseButton then
         GUIModule.createToggleButton()
     end
     
-    -- Create main frame (initially hidden)
     GUIModule.createMainFrame()
 end
 
@@ -489,182 +674,454 @@ function GUIModule.createToggleButton()
     local toggleFrame = Instance.new("Frame")
     toggleFrame.Name = "ToggleFrame"
     toggleFrame.Parent = GUIModule.screenGui
-    toggleFrame.BackgroundColor3 = Color3.fromRGB(51, 51, 51)
-    toggleFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
-    toggleFrame.Position = UDim2.new(0.5, -75, 0, 20)
-    toggleFrame.Size = UDim2.new(0, 150, 0, 50)
+    toggleFrame.BackgroundColor3 = Config.GUI.theme.surface
+    toggleFrame.BorderSizePixel = 0
+    toggleFrame.Position = UDim2.new(0, 20, 0, 20)
+    toggleFrame.Size = UDim2.new(0, 60, 0, 60)
     toggleFrame.Active = true
     toggleFrame.Draggable = true
     
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 30)
+    corner.Parent = toggleFrame
+    
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Config.GUI.theme.primary),
+        ColorSequenceKeypoint.new(1, Config.GUI.theme.secondary)
+    }
+    gradient.Rotation = 45
+    gradient.Parent = toggleFrame
+    
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.Parent = toggleFrame
+    shadow.BackgroundTransparency = 1
+    shadow.Position = UDim2.new(0, -10, 0, -10)
+    shadow.Size = UDim2.new(1, 20, 1, 20)
+    shadow.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    shadow.ImageColor3 = Color3.new(0, 0, 0)
+    shadow.ImageTransparency = 0.8
+    shadow.ZIndex = -1
+    
+    local shadowCorner = Instance.new("UICorner")
+    shadowCorner.CornerRadius = UDim.new(0, 40)
+    shadowCorner.Parent = shadow
+    
     local toggleButton = Instance.new("TextButton")
     toggleButton.Parent = toggleFrame
-    toggleButton.BackgroundColor3 = Color3.fromRGB(49, 49, 49)
-    toggleButton.BorderColor3 = Color3.fromRGB(255, 255, 255)
-    toggleButton.Size = UDim2.new(1, 0, 0.68, 0)
-    toggleButton.Position = UDim2.new(0, 0, 0.32, 0)
+    toggleButton.BackgroundTransparency = 1
+    toggleButton.Size = UDim2.new(1, 0, 1, 0)
     toggleButton.Font = Enum.Font.GothamBold
-    toggleButton.Text = "Toggle GUI"
-    toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toggleButton.TextSize = 14
+    toggleButton.Text = "⚙️"
+    toggleButton.TextColor3 = Config.GUI.theme.text
+    toggleButton.TextSize = 24
+    toggleButton.TextScaled = true
+    
+    -- Hover effects
+    toggleButton.MouseEnter:Connect(function()
+        AnimationSystem.spring(toggleFrame, {Size = UDim2.new(0, 65, 0, 65)}, 0.2)
+    end)
+    
+    toggleButton.MouseLeave:Connect(function()
+        AnimationSystem.spring(toggleFrame, {Size = UDim2.new(0, 60, 0, 60)}, 0.2)
+    end)
     
     toggleButton.MouseButton1Click:Connect(function()
+        AnimationSystem.bounce(toggleFrame, {Size = UDim2.new(0, 55, 0, 55)}, 0.1)
+        wait(0.1)
+        AnimationSystem.spring(toggleFrame, {Size = UDim2.new(0, 60, 0, 60)}, 0.1)
+        
         if GUIModule.mainFrame then
-            GUIModule.mainFrame.Visible = not GUIModule.mainFrame.Visible
+            local isVisible = GUIModule.mainFrame.Visible
+            if isVisible then
+                AnimationSystem.tween(GUIModule.mainFrame, {
+                    Position = UDim2.new(0.5, 0, -0.5, 0)
+                }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                wait(0.3)
+                GUIModule.mainFrame.Visible = false
+            else
+                GUIModule.mainFrame.Visible = true
+                GUIModule.mainFrame.Position = UDim2.new(0.5, 0, -0.5, 0)
+                AnimationSystem.spring(GUIModule.mainFrame, {
+                    Position = UDim2.new(0.5, 0, 0.5, 0)
+                }, 0.4)
+            end
         end
     end)
 end
 
 function GUIModule.createMainFrame()
-    -- This would contain the full GUI implementation
-    -- For brevity, I'll create a simplified version
-    
     GUIModule.mainFrame = Instance.new("Frame")
     GUIModule.mainFrame.Name = "MainFrame"
     GUIModule.mainFrame.Parent = GUIModule.screenGui
-    GUIModule.mainFrame.BackgroundColor3 = Color3.fromRGB(52, 52, 52)
-    GUIModule.mainFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
-    GUIModule.mainFrame.Position = UDim2.new(0.5, -400, 0.5, -200)
-    GUIModule.mainFrame.Size = UDim2.new(0, 800, 0, 400)
+    GUIModule.mainFrame.BackgroundColor3 = Config.GUI.theme.background
+    GUIModule.mainFrame.BorderSizePixel = 0
+    GUIModule.mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    GUIModule.mainFrame.Size = UDim2.new(0, 600, 0, 400)
+    GUIModule.mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     GUIModule.mainFrame.Active = true
     GUIModule.mainFrame.Draggable = true
     GUIModule.mainFrame.Visible = false
     
-    -- Add title
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 20)
+    corner.Parent = GUIModule.mainFrame
+    
+    -- Glass effect
+    local glassEffect = Instance.new("Frame")
+    glassEffect.Name = "GlassEffect"
+    glassEffect.Parent = GUIModule.mainFrame
+    glassEffect.BackgroundColor3 = Config.GUI.theme.surface
+    glassEffect.BackgroundTransparency = 0.1
+    glassEffect.BorderSizePixel = 0
+    glassEffect.Size = UDim2.new(1, 0, 1, 0)
+    
+    local glassCorner = Instance.new("UICorner")
+    glassCorner.CornerRadius = UDim.new(0, 20)
+    glassCorner.Parent = glassEffect
+    
+    -- Title bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.Parent = GUIModule.mainFrame
+    titleBar.BackgroundTransparency = 1
+    titleBar.Size = UDim2.new(1, 0, 0, 60)
+    
     local title = Instance.new("TextLabel")
-    title.Parent = GUIModule.mainFrame
+    title.Parent = titleBar
     title.BackgroundTransparency = 1
-    title.Position = UDim2.new(0, 10, 0, 5)
-    title.Size = UDim2.new(0, 200, 0, 30)
+    title.Position = UDim2.new(0, 20, 0, 0)
+    title.Size = UDim2.new(0, 300, 1, 0)
     title.Font = Enum.Font.GothamBold
     title.Text = script_info.name .. " v" .. script_info.version
-    title.TextColor3 = Color3.fromRGB(17, 223, 255)
-    title.TextSize = 18
+    title.TextColor3 = Config.GUI.theme.text
+    title.TextSize = 24
     title.TextXAlignment = Enum.TextXAlignment.Left
     
-    -- Add sections for different features
-    GUIModule.createAimbotSection()
-    GUIModule.createESPSection()
+    -- Gradient text effect
+    local titleGradient = Instance.new("UIGradient")
+    titleGradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Config.GUI.theme.primary),
+        ColorSequenceKeypoint.new(1, Config.GUI.theme.accent)
+    }
+    titleGradient.Parent = title
+    
+    -- Content area
+    local contentFrame = Instance.new("ScrollingFrame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Parent = GUIModule.mainFrame
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Position = UDim2.new(0, 0, 0, 60)
+    contentFrame.Size = UDim2.new(1, 0, 1, -60)
+    contentFrame.ScrollBarThickness = 8
+    contentFrame.ScrollBarImageColor3 = Config.GUI.theme.primary
+    contentFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
+    
+    local contentLayout = Instance.new("UIListLayout")
+    contentLayout.Parent = contentFrame
+    contentLayout.Padding = UDim.new(0, 20)
+    contentLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    
+    -- Create sections
+    GUIModule.createAimbotSection(contentFrame)
+    GUIModule.createESPSection(contentFrame)
 end
 
-function GUIModule.createAimbotSection()
-    -- Simplified aimbot controls
+function GUIModule.createSection(parent, title)
     local section = Instance.new("Frame")
-    section.Name = "AimbotSection"
-    section.Parent = GUIModule.mainFrame
-    section.BackgroundTransparency = 1
-    section.Position = UDim2.new(0, 20, 0, 50)
-    section.Size = UDim2.new(0, 200, 1, -60)
+    section.Name = title .. "Section"
+    section.Parent = parent
+    section.BackgroundColor3 = Config.GUI.theme.surface
+    section.BorderSizePixel = 0
+    section.Size = UDim2.new(0, 560, 0, 200)
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = section
+    
+    local sectionTitle = Instance.new("TextLabel")
+    sectionTitle.Parent = section
+    sectionTitle.BackgroundTransparency = 1
+    sectionTitle.Position = UDim2.new(0, 20, 0, 10)
+    sectionTitle.Size = UDim2.new(1, -40, 0, 30)
+    sectionTitle.Font = Enum.Font.GothamBold
+    sectionTitle.Text = title
+    sectionTitle.TextColor3 = Config.GUI.theme.primary
+    sectionTitle.TextSize = 18
+    sectionTitle.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local contentArea = Instance.new("Frame")
+    contentArea.Name = "ContentArea"
+    contentArea.Parent = section
+    contentArea.BackgroundTransparency = 1
+    contentArea.Position = UDim2.new(0, 20, 0, 50)
+    contentArea.Size = UDim2.new(1, -40, 1, -60)
     
     local layout = Instance.new("UIListLayout")
-    layout.Parent = section
-    layout.Padding = UDim.new(0, 5)
+    layout.Parent = contentArea
+    layout.Padding = UDim.new(0, 10)
+    layout.FillDirection = Enum.FillDirection.Vertical
     
-    -- Section title
-    local title = Instance.new("TextLabel")
-    title.Parent = section
-    title.BackgroundTransparency = 1
-    title.Size = UDim2.new(1, 0, 0, 25)
-    title.Font = Enum.Font.GothamBold
-    title.Text = "Aimbot"
-    title.TextColor3 = Color3.fromRGB(17, 223, 255)
-    title.TextSize = 16
-    title.TextXAlignment = Enum.TextXAlignment.Left
+    return section, contentArea
+end
+
+function GUIModule.createToggle(parent, text, callback, defaultValue)
+    local toggle = Instance.new("Frame")
+    toggle.Name = text .. "Toggle"
+    toggle.Parent = parent
+    toggle.BackgroundTransparency = 1
+    toggle.Size = UDim2.new(1, 0, 0, 30)
     
-    -- Create toggle buttons
-    GUIModule.createToggle(section, "Enable", function(enabled)
+    local label = Instance.new("TextLabel")
+    label.Parent = toggle
+    label.BackgroundTransparency = 1
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Size = UDim2.new(1, -60, 1, 0)
+    label.Font = Enum.Font.Gotham
+    label.Text = text
+    label.TextColor3 = Config.GUI.theme.text
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local toggleButton = Instance.new("Frame")
+    toggleButton.Parent = toggle
+    toggleButton.BackgroundColor3 = Config.GUI.theme.background
+    toggleButton.BorderSizePixel = 0
+    toggleButton.Position = UDim2.new(1, -50, 0, 5)
+    toggleButton.Size = UDim2.new(0, 50, 0, 20)
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 10)
+    toggleCorner.Parent = toggleButton
+    
+    local toggleCircle = Instance.new("Frame")
+    toggleCircle.Parent = toggleButton
+    toggleCircle.BackgroundColor3 = Config.GUI.theme.textSecondary
+    toggleCircle.BorderSizePixel = 0
+    toggleCircle.Position = UDim2.new(0, 2, 0, 2)
+    toggleCircle.Size = UDim2.new(0, 16, 0, 16)
+    
+    local circleCorner = Instance.new("UICorner")
+    circleCorner.CornerRadius = UDim.new(0, 8)
+    circleCorner.Parent = toggleCircle
+    
+    local enabled = defaultValue or false
+    
+    local function updateToggle()
+        if enabled then
+            AnimationSystem.tween(toggleCircle, {
+                Position = UDim2.new(1, -18, 0, 2),
+                BackgroundColor3 = Config.GUI.theme.text
+            }, 0.2)
+            AnimationSystem.tween(toggleButton, {
+                BackgroundColor3 = Config.GUI.theme.primary
+            }, 0.2)
+        else
+            AnimationSystem.tween(toggleCircle, {
+                Position = UDim2.new(0, 2, 0, 2),
+                BackgroundColor3 = Config.GUI.theme.textSecondary
+            }, 0.2)
+            AnimationSystem.tween(toggleButton, {
+                BackgroundColor3 = Config.GUI.theme.background
+            }, 0.2)
+        end
+    end
+    
+    local clickDetector = Instance.new("TextButton")
+    clickDetector.Parent = toggleButton
+    clickDetector.BackgroundTransparency = 1
+    clickDetector.Size = UDim2.new(1, 0, 1, 0)
+    clickDetector.Text = ""
+    
+    clickDetector.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        updateToggle()
+        if callback then
+            callback(enabled)
+        end
+    end)
+    
+    updateToggle()
+    return toggle
+end
+
+function GUIModule.createSlider(parent, text, min, max, default, callback)
+    local slider = Instance.new("Frame")
+    slider.Name = text .. "Slider"
+    slider.Parent = parent
+    slider.BackgroundTransparency = 1
+    slider.Size = UDim2.new(1, 0, 0, 50)
+    
+    local label = Instance.new("TextLabel")
+    label.Parent = slider
+    label.BackgroundTransparency = 1
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Font = Enum.Font.Gotham
+    label.Text = text
+    label.TextColor3 = Config.GUI.theme.text
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Parent = slider
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Position = UDim2.new(1, -60, 0, 0)
+    valueLabel.Size = UDim2.new(0, 60, 0, 20)
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.Text = tostring(default)
+    valueLabel.TextColor3 = Config.GUI.theme.primary
+    valueLabel.TextSize = 14
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    
+    local sliderTrack = Instance.new("Frame")
+    sliderTrack.Parent = slider
+    sliderTrack.BackgroundColor3 = Config.GUI.theme.background
+    sliderTrack.BorderSizePixel = 0
+    sliderTrack.Position = UDim2.new(0, 0, 0, 25)
+    sliderTrack.Size = UDim2.new(1, 0, 0, 6)
+    
+    local trackCorner = Instance.new("UICorner")
+    trackCorner.CornerRadius = UDim.new(0, 3)
+    trackCorner.Parent = sliderTrack
+    
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Parent = sliderTrack
+    sliderFill.BackgroundColor3 = Config.GUI.theme.primary
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 3)
+    fillCorner.Parent = sliderFill
+    
+    local sliderHandle = Instance.new("Frame")
+    sliderHandle.Parent = slider
+    sliderHandle.BackgroundColor3 = Config.GUI.theme.text
+    sliderHandle.BorderSizePixel = 0
+    sliderHandle.Position = UDim2.new((default - min) / (max - min), -8, 0, 22)
+    sliderHandle.Size = UDim2.new(0, 16, 0, 12)
+    
+    local handleCorner = Instance.new("UICorner")
+    handleCorner.CornerRadius = UDim.new(0, 6)
+    handleCorner.Parent = sliderHandle
+    
+    local dragging = false
+    local currentValue = default
+    
+    local function updateSlider(value)
+        currentValue = math.clamp(value, min, max)
+        local percentage = (currentValue - min) / (max - min)
+        
+        AnimationSystem.tween(sliderFill, {Size = UDim2.new(percentage, 0, 1, 0)}, 0.1)
+        AnimationSystem.tween(sliderHandle, {Position = UDim2.new(percentage, -8, 0, 22)}, 0.1)
+        
+        valueLabel.Text = string.format("%.1f", currentValue)
+        
+        if callback then
+            callback(currentValue)
+        end
+    end
+    
+    sliderHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            AnimationSystem.tween(sliderHandle, {Size = UDim2.new(0, 20, 0, 16)}, 0.1)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
+            dragging = false
+            AnimationSystem.tween(sliderHandle, {Size = UDim2.new(0, 16, 0, 12)}, 0.1)
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local mousePos = UserInputService:GetMouseLocation()
+            local sliderPos = sliderTrack.AbsolutePosition
+            local sliderSize = sliderTrack.AbsoluteSize
+            
+            local percentage = math.clamp((mousePos.X - sliderPos.X) / sliderSize.X, 0, 1)
+            local value = min + (percentage * (max - min))
+            
+            updateSlider(value)
+        end
+    end)
+    
+    return slider
+end
+
+function GUIModule.createAimbotSection(parent)
+    local section, contentArea = GUIModule.createSection(parent, "Aimbot")
+    
+    GUIModule.createToggle(contentArea, "Enable", function(enabled)
         Config.Aimbot.enabled = enabled
     end)
     
-    GUIModule.createToggle(section, "Team Check", function(enabled)
+    GUIModule.createToggle(contentArea, "Team Check", function(enabled)
         Config.Aimbot.teamCheck = enabled
     end)
     
-    GUIModule.createToggle(section, "Wall Check", function(enabled)
+    GUIModule.createToggle(contentArea, "Wall Check", function(enabled)
         Config.Aimbot.wallCheck = enabled
     end)
     
-    GUIModule.createToggle(section, "Show FOV", function(enabled)
+    GUIModule.createToggle(contentArea, "Show FOV", function(enabled)
         Config.Aimbot.showFov = enabled
     end)
+    
+    GUIModule.createSlider(contentArea, "FOV", 10, 500, Config.Aimbot.fov, function(value)
+        Config.Aimbot.fov = value
+    end)
+    
+    GUIModule.createSlider(contentArea, "Smoothing", 0.1, 1, Config.Aimbot.smoothing, function(value)
+        Config.Aimbot.smoothing = value
+    end)
+    
+    section.Size = UDim2.new(0, 560, 0, 300)
 end
 
-function GUIModule.createESPSection()
-    -- Simplified ESP controls
-    local section = Instance.new("Frame")
-    section.Name = "ESPSection"
-    section.Parent = GUIModule.mainFrame
-    section.BackgroundTransparency = 1
-    section.Position = UDim2.new(0, 250, 0, 50)
-    section.Size = UDim2.new(0, 200, 1, -60)
+function GUIModule.createESPSection(parent)
+    local section, contentArea = GUIModule.createSection(parent, "ESP")
     
-    local layout = Instance.new("UIListLayout")
-    layout.Parent = section
-    layout.Padding = UDim.new(0, 5)
-    
-    -- Section title
-    local title = Instance.new("TextLabel")
-    title.Parent = section
-    title.BackgroundTransparency = 1
-    title.Size = UDim2.new(1, 0, 0, 25)
-    title.Font = Enum.Font.GothamBold
-    title.Text = "ESP"
-    title.TextColor3 = Color3.fromRGB(17, 223, 255)
-    title.TextSize = 16
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    
-    -- Create toggle buttons
-    GUIModule.createToggle(section, "Box ESP", function(enabled)
+    GUIModule.createToggle(contentArea, "Box ESP", function(enabled)
         Config.ESP.Box.enabled = enabled
     end)
     
-    GUIModule.createToggle(section, "Outlines", function(enabled)
-        Config.ESP.Outlines.enabled = enabled
-    end)
-    
-    GUIModule.createToggle(section, "Tracers", function(enabled)
-        Config.ESP.Tracers.enabled = enabled
-    end)
-    
-    GUIModule.createToggle(section, "Show Names", function(enabled)
+    GUIModule.createToggle(contentArea, "Show Names", function(enabled)
         Config.ESP.Box.showName = enabled
     end)
     
-    GUIModule.createToggle(section, "Show Distance", function(enabled)
+    GUIModule.createToggle(contentArea, "Show Distance", function(enabled)
         Config.ESP.Box.showDistance = enabled
     end)
     
-    GUIModule.createToggle(section, "Show Health", function(enabled)
+    GUIModule.createToggle(contentArea, "Show Health", function(enabled)
         Config.ESP.Box.showHealth = enabled
     end)
-end
-
-function GUIModule.createToggle(parent, text, callback)
-    local button = Instance.new("TextButton")
-    button.Parent = parent
-    button.BackgroundColor3 = Color3.fromRGB(52, 52, 52)
-    button.BorderColor3 = Color3.fromRGB(255, 255, 255)
-    button.Size = UDim2.new(1, 0, 0, 30)
-    button.Font = Enum.Font.Gotham
-    button.Text = text
-    button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    button.TextSize = 14
     
-    local enabled = false
-    
-    button.MouseButton1Click:Connect(function()
-        enabled = not enabled
-        button.BackgroundColor3 = enabled and Color3.fromRGB(2, 54, 8) or Color3.fromRGB(52, 52, 52)
-        callback(enabled)
+    GUIModule.createToggle(contentArea, "Tracers", function(enabled)
+        Config.ESP.Tracers.enabled = enabled
     end)
     
-    return button
+    GUIModule.createToggle(contentArea, "Skeleton", function(enabled)
+        Config.ESP.Skeleton.enabled = enabled
+    end)
+    
+    GUIModule.createToggle(contentArea, "Chams", function(enabled)
+        Config.ESP.Chams.enabled = enabled
+    end)
+    
+    section.Size = UDim2.new(0, 560, 0, 350)
 end
 
 -- Input Handler
 local InputHandler = {}
 
 function InputHandler.init()
-    -- Handle aimbot keybind
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
@@ -674,7 +1131,20 @@ function InputHandler.init()
         
         if input.KeyCode == Config.GUI.keybind and Config.GUI.keybindEnable then
             if GUIModule.mainFrame then
-                GUIModule.mainFrame.Visible = not GUIModule.mainFrame.Visible
+                local isVisible = GUIModule.mainFrame.Visible
+                if isVisible then
+                    AnimationSystem.tween(GUIModule.mainFrame, {
+                        Position = UDim2.new(0.5, 0, -0.5, 0)
+                    }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                    wait(0.3)
+                    GUIModule.mainFrame.Visible = false
+                else
+                    GUIModule.mainFrame.Visible = true
+                    GUIModule.mainFrame.Position = UDim2.new(0.5, 0, -0.5, 0)
+                    AnimationSystem.spring(GUIModule.mainFrame, {
+                        Position = UDim2.new(0.5, 0, 0.5, 0)
+                    }, 0.4)
+                end
             end
         end
     end)
@@ -702,7 +1172,9 @@ local function mainLoop()
     -- Update ESP for all players
     for _, player in pairs(Players:GetPlayers()) do
         if Utils.isPlayerValid(player) then
-            ESPModule.updatePlayer(player)
+            ESPModule.updateESP(player)
+        else
+            ESPModule.hideESP(player)
         end
     end
 end
@@ -710,11 +1182,41 @@ end
 -- Player Management
 local function onPlayerAdded(player)
     if player == PLAYER then return end
-    ESPModule.addPlayer(player)
+    ESPModule.createESP(player)
+    
+    player.CharacterAdded:Connect(function()
+        wait(1) -- Wait for character to fully load
+        if ESPModule.objects[player] and ESPModule.objects[player].chams then
+            ESPModule.objects[player].chams:Destroy()
+        end
+        if player.Character then
+            local chams = Instance.new("Highlight")
+            chams.Parent = player.Character
+            chams.FillColor = Config.ESP.Chams.fillColor
+            chams.OutlineColor = Config.ESP.Chams.outlineColor
+            chams.FillTransparency = Config.ESP.Chams.fillTransparency
+            chams.OutlineTransparency = Config.ESP.Chams.outlineTransparency
+            chams.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            chams.Enabled = false
+            
+            if ESPModule.objects[player] then
+                ESPModule.objects[player].chams = chams
+            end
+        end
+    end)
 end
 
 local function onPlayerRemoving(player)
-    ESPModule.removePlayer(player)
+    ESPModule.removeESP(player)
+end
+
+-- Cleanup function
+local function cleanup()
+    FOVModule.cleanup()
+    ESPModule.cleanup()
+    if GUIModule.screenGui then
+        GUIModule.screenGui:Destroy()
+    end
 end
 
 -- Initialize Everything
@@ -742,7 +1244,10 @@ local function initialize()
     end
     
     -- Start main loop
-    RunService.RenderStepped:Connect(mainLoop)
+    RunService.Heartbeat:Connect(mainLoop)
+    
+    -- Cleanup on game close
+    game:BindToClose(cleanup)
     
     print(script_info.name .. " v" .. script_info.version .. " loaded successfully!")
 end
